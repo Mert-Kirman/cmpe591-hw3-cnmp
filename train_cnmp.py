@@ -62,7 +62,7 @@ def load_data(data_path = "cnmp_dataset.pt"):
 
     return X_data, Y_data
 
-def train(model, optimizer, X_train, Y_train, epochs, batch_size):
+def train(model, optimizer, X_train, Y_train, epochs, batch_size, max_observations_per_trajectory=10):
     train_losses = []
 
     print("\nTraining CNMP...")
@@ -73,7 +73,7 @@ def train(model, optimizer, X_train, Y_train, epochs, batch_size):
         batch_Y = Y_train[batch_idx]
         
         # Sample random number of context points
-        n_context = np.random.randint(1, 30)
+        n_context = np.random.randint(1, max_observations_per_trajectory + 1)
         context_idx = np.random.choice(100, n_context, replace=False)
         
         # Observation = [X_context, Y_context] concatenated
@@ -109,7 +109,7 @@ def train(model, optimizer, X_train, Y_train, epochs, batch_size):
     plt.savefig("assets/cnmp_training_loss.png")
     print("Saved training loss curve to assets/cnmp_training_loss.png")
 
-def test(model, X_test, Y_test):
+def test(model, X_test, Y_test, max_observations_per_trajectory=10):
     print("\nRunning 100 Random Evaluation Tests...")
     mse_ee_list = []
     mse_obj_list = []
@@ -122,7 +122,7 @@ def test(model, X_test, Y_test):
         t_Y = Y_test[test_idx:test_idx+1]
         
         # Random context and query counts
-        n_context = np.random.randint(1, 50)
+        n_context = np.random.randint(1, max_observations_per_trajectory + 1)
         n_target = np.random.randint(1, 100)
         
         context_idx = np.random.choice(100, n_context, replace=False)
@@ -155,6 +155,9 @@ def test(model, X_test, Y_test):
     labels = ['End-Effector Position', 'Object Position']
     means = [ee_mean, obj_mean]
     stds = [ee_std, obj_std]
+
+    print(f"\nEnd-Effector MSE: Mean={ee_mean:.4f}, Std={ee_std:.4f}")
+    print(f"Object MSE: Mean={obj_mean:.4f}, Std={obj_std:.4f}")
 
     plt.figure(figsize=(7, 6))
     bars = plt.bar(labels, means, yerr=stds, capsize=10, color=['#4C72B0', '#DD8452'], alpha=0.8)
@@ -191,9 +194,11 @@ if __name__ == "__main__":
 
     epochs = 3000
     batch_size = 64
+
+    max_observations_per_trajectory = 10
     
     # Train the model
-    train(model, optimizer, X_train, Y_train, epochs, batch_size)
+    train(model, optimizer, X_train, Y_train, epochs, batch_size, max_observations_per_trajectory)
 
     # Evaluation (100 Tests)
-    test(model, X_test, Y_test)
+    test(model, X_test, Y_test, max_observations_per_trajectory)

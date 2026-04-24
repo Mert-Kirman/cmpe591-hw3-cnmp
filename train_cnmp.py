@@ -94,7 +94,10 @@ def train(model, optimizer, X_train, Y_train, epochs, batch_size):
         train_losses.append(loss.item())
 
         if (epoch + 1) % 200 == 0:
-            print(f"Epoch {epoch+1}/{epochs}, Loss: {loss.item():.4f}", end="\r")
+            tqdm.write(f"Epoch {epoch+1}/{epochs}, Loss: {loss.item():.4f}")
+
+    torch.save(model.state_dict(), "assets/cnmp_model.pth")
+    print("Saved trained model to assets/cnmp_model.pth")
 
     # Plot and Save Training Loss Curve
     plt.figure(figsize=(8, 5))
@@ -187,7 +190,7 @@ if __name__ == "__main__":
     optimizer = torch.optim.Adam(model.parameters(), lr=5e-4)
 
     epochs = 3000
-    batch_size = 32
+    batch_size = 64
     
     # Train the model
     train(model, optimizer, X_train, Y_train, epochs, batch_size)

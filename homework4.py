@@ -6,11 +6,12 @@ import matplotlib.pyplot as plt
 import environment
 
 
-class CNP(torch.nn.Module):
-    def __init__(self, in_shape, hidden_size, num_hidden_layers, min_std=0.1):
-        super(CNP, self).__init__()
+class CNMP(torch.nn.Module):
+    def __init__(self, in_shape, condition_dim, hidden_size, num_hidden_layers, min_std=0.1):
+        super(CNMP, self).__init__()
         self.d_x = in_shape[0]
         self.d_y = in_shape[1]
+        self.d_cond = condition_dim
 
         self.encoder = []
         self.encoder.append(torch.nn.Linear(self.d_x + self.d_y, hidden_size))
@@ -22,7 +23,7 @@ class CNP(torch.nn.Module):
         self.encoder = torch.nn.Sequential(*self.encoder)
 
         self.query = []
-        self.query.append(torch.nn.Linear(hidden_size + self.d_x, hidden_size))
+        self.query.append(torch.nn.Linear(hidden_size + self.d_x + self.d_cond, hidden_size))
         self.query.append(torch.nn.ReLU())
         for _ in range(num_hidden_layers - 1):
             self.query.append(torch.nn.Linear(hidden_size, hidden_size))
@@ -32,7 +33,7 @@ class CNP(torch.nn.Module):
 
         self.min_std = min_std
 
-    def nll_loss(self, observation, target, target_truth, observation_mask=None, target_mask=None):
+    def nll_loss(self, observation, target, condition, target_truth, observation_mask=None, target_mask=None):
         '''
         The original negative log-likelihood loss for training CNP.
         Parameters
@@ -62,7 +63,7 @@ class CNP(torch.nn.Module):
         loss : torch.Tensor (float)
             The NLL loss.
         '''
-        mean, std = self.forward(observation, target, observation_mask)
+        mean, std = self.forward(observation, target, condition, observation_mask)
         dist = torch.distributions.Normal(mean, std)
         nll = -dist.log_prob(target_truth)
         if target_mask is not None:
@@ -76,7 +77,7 @@ class CNP(torch.nn.Module):
             loss = nll.mean()
         return loss
 
-    def forward(self, observation, target, observation_mask=None):
+    def forward(self, observation, target, condition, observation_mask=None):
         '''
         Forward pass of CNP.
         Parameters
@@ -102,7 +103,7 @@ class CNP(torch.nn.Module):
         '''
         h = self.encode(observation)
         r = self.aggregate(h, observation_mask=observation_mask)
-        h_cat = self.concatenate(r, target)
+        h_cat = self.concatenate(r, target, condition)
         query_out = self.decode(h_cat)
         mean = query_out[..., :self.d_y]
         logstd = query_out[..., self.d_y:]
@@ -132,10 +133,10 @@ class CNP(torch.nn.Module):
             r = h.mean(dim=1)
         return r
 
-    def concatenate(self, r, target):
+    def concatenate(self, r, target, condition):
         num_target_points = target.shape[1]
         r = r.unsqueeze(1).repeat(1, num_target_points, 1)  # repeating the same r_avg for each target
-        h_cat = torch.cat([r, target], dim=-1)
+        h_cat = torch.cat([r, target, condition], dim=-1)
         return h_cat
 
 

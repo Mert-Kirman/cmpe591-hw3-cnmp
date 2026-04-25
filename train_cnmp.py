@@ -191,9 +191,12 @@ def test(model, X_test, C_test, Y_test, max_obs_per_traj=10):
     plt.title("Mean Squared Error of CNMP Predictions (100 Tests)")
     plt.ylabel("MSE")
     
-    for bar in bars:
+    # Add exact values on top of bars, factoring in the standard deviation (std)
+    for bar, std in zip(bars, stds):
         yval = bar.get_height()
-        plt.text(bar.get_x() + bar.get_width()/2, yval + 0.001, f'{yval:.4f}', ha='center', va='bottom', fontweight='bold')
+        # Place text above the error bar + a tiny margin
+        plt.text(bar.get_x() + bar.get_width()/2, yval + std + 0.0001, 
+                 f'{yval:.5f}', ha='center', va='bottom', fontweight='bold')
 
     plt.tight_layout()
     plt.savefig("assets/cnmp_mse_barplot.png")

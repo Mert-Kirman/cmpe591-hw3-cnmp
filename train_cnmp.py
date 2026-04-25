@@ -6,7 +6,7 @@ from tqdm import tqdm
 
 from homework4 import Hw5Env, bezier, CNMP
 
-def collect_demonstrations(num_trajectories=360):
+def collect_demonstrations(num_trajectories=500):
     """Generates the dataset using the physics environment."""
     env = Hw5Env(render_mode="offscreen")
     
@@ -56,12 +56,12 @@ def load_data(data_path="cnmp_dataset.pt"):
         dataset = torch.load(data_path)
         X_data, C_data, Y_data = dataset['X'], dataset['C'], dataset['Y']
     else:
-        X_data, C_data, Y_data = collect_demonstrations(360)
+        X_data, C_data, Y_data = collect_demonstrations()
         torch.save({'X': X_data, 'C': C_data, 'Y': Y_data}, data_path)
 
     return X_data, C_data, Y_data
 
-def train(model, optimizer, scheduler, X_train, C_train, Y_train, X_val, C_val, Y_val, epochs, batch_size, max_obs_per_traj=10):
+def train(model, optimizer, scheduler, X_train, C_train, Y_train, X_val, C_val, Y_val, epochs, batch_size, max_obs_per_traj=10, max_target_per_traj=10):
     train_losses = []
     val_losses = []
     best_val_loss = float('inf')
@@ -70,23 +70,35 @@ def train(model, optimizer, scheduler, X_train, C_train, Y_train, X_val, C_val, 
     for epoch in tqdm(range(epochs)):
         model.train()
         
+        # --- Training Phase ---
         # Sample a random batch of training trajectories
         batch_idx = np.random.choice(len(X_train), batch_size, replace=False)
-        batch_X = X_train[batch_idx]
-        batch_C = C_train[batch_idx]
-        batch_Y = Y_train[batch_idx]
         
         n_context = np.random.randint(1, max_obs_per_traj + 1)
-        context_idx = np.random.choice(100, n_context, replace=False)
-        
-        # Observation = [X_context, Y_context] (No Condition in encoder)
-        obs_X = batch_X[:, context_idx, :]
-        obs_Y = batch_Y[:, context_idx, :]
+        n_target = np.random.randint(1, max_target_per_traj + 1)
+
+        # Initialize empty tensors to hold the batch
+        obs_X = torch.empty((batch_size, n_context, X_train.shape[-1]), device=device)
+        obs_Y = torch.empty((batch_size, n_context, Y_train.shape[-1]), device=device)
+        target = torch.empty((batch_size, n_target, X_train.shape[-1]), device=device)
+        batch_C = torch.empty((batch_size, n_target, C_train.shape[-1]), device=device)
+        target_truth = torch.empty((batch_size, n_target, Y_train.shape[-1]), device=device)
+
+        # Generate UNIQUE time indices for each trajectory in the batch
+        for i, idx in enumerate(batch_idx):
+            c_idx = np.random.choice(100, n_context, replace=False) # context indices
+            t_idx = np.random.choice(100, n_target, replace=False) # target indices
+            
+            obs_X[i] = X_train[idx, c_idx, :]
+            obs_Y[i] = Y_train[idx, c_idx, :]
+            target[i] = X_train[idx, t_idx, :]
+            batch_C[i] = C_train[idx, t_idx, :]
+            target_truth[i] = Y_train[idx, t_idx, :]
+            
         observation = torch.cat([obs_X, obs_Y], dim=-1)
         
-        # Calculate Training Loss
         optimizer.zero_grad()
-        loss = model.nll_loss(observation, target=batch_X, condition=batch_C, target_truth=batch_Y)
+        loss = model.nll_loss(observation, target=target, condition=batch_C, target_truth=target_truth)
         loss.backward()
         optimizer.step()
         
@@ -96,18 +108,30 @@ def train(model, optimizer, scheduler, X_train, C_train, Y_train, X_val, C_val, 
         model.eval()
         with torch.no_grad():
             val_batch_idx = np.random.choice(len(X_val), min(batch_size, len(X_val)), replace=False)
-            v_batch_X = X_val[val_batch_idx]
-            v_batch_C = C_val[val_batch_idx]
-            v_batch_Y = Y_val[val_batch_idx]
             
             v_n_context = np.random.randint(1, max_obs_per_traj + 1)
-            v_context_idx = np.random.choice(100, v_n_context, replace=False)
+            v_n_target = np.random.randint(1, max_target_per_traj + 1)
             
-            v_obs_X = v_batch_X[:, v_context_idx, :]
-            v_obs_Y = v_batch_Y[:, v_context_idx, :]
+            v_obs_X = torch.empty((len(val_batch_idx), v_n_context, X_val.shape[-1]), device=device)
+            v_obs_Y = torch.empty((len(val_batch_idx), v_n_context, Y_val.shape[-1]), device=device)
+            v_target = torch.empty((len(val_batch_idx), v_n_target, X_val.shape[-1]), device=device)
+            v_batch_C = torch.empty((len(val_batch_idx), v_n_target, C_val.shape[-1]), device=device)
+            v_target_truth = torch.empty((len(val_batch_idx), v_n_target, Y_val.shape[-1]), device=device)
+
+            # Generate UNIQUE time indices for each trajectory in the batch
+            for i, idx in enumerate(val_batch_idx):
+                v_c_idx = np.random.choice(100, v_n_context, replace=False)
+                v_t_idx = np.random.choice(100, v_n_target, replace=False)
+
+                v_obs_X[i] = X_val[idx, v_c_idx, :]
+                v_obs_Y[i] = Y_val[idx, v_c_idx, :]
+                v_target[i] = X_val[idx, v_t_idx, :]
+                v_batch_C[i] = C_val[idx, v_t_idx, :]
+                v_target_truth[i] = Y_val[idx, v_t_idx, :]
+
             v_observation = torch.cat([v_obs_X, v_obs_Y], dim=-1)
             
-            val_loss = model.nll_loss(v_observation, target=v_batch_X, condition=v_batch_C, target_truth=v_batch_Y)
+            val_loss = model.nll_loss(v_observation, target=v_target, condition=v_batch_C, target_truth=v_target_truth)
             val_losses.append(val_loss.item())
 
             # Save best model
@@ -138,7 +162,7 @@ def train(model, optimizer, scheduler, X_train, C_train, Y_train, X_val, C_val, 
     plt.savefig("assets/cnmp_training_loss.png")
     print("Saved training/val loss curve to assets/cnmp_training_loss.png")
 
-def test(model, X_test, C_test, Y_test, max_obs_per_traj=10):
+def test(model, X_test, C_test, Y_test, max_obs_per_traj=10, max_target_per_traj=10):
     print("\nRunning 100 Random Evaluation Tests on Best Model...")
     # Load the best weights
     model.load_state_dict(torch.load("assets/best_cnmp_model.pth"))
@@ -154,7 +178,7 @@ def test(model, X_test, C_test, Y_test, max_obs_per_traj=10):
         t_Y = Y_test[test_idx:test_idx+1]
         
         n_context = np.random.randint(1, max_obs_per_traj + 1)
-        n_target = np.random.randint(1, 100)
+        n_target = np.random.randint(1, max_target_per_traj + 1)
         
         context_idx = np.random.choice(100, n_context, replace=False)
         target_idx = np.random.choice(100, n_target, replace=False)
@@ -190,13 +214,6 @@ def test(model, X_test, C_test, Y_test, max_obs_per_traj=10):
     bars = plt.bar(labels, means, yerr=stds, capsize=10, color=['#4C72B0', '#DD8452'], alpha=0.8)
     plt.title("Mean Squared Error of CNMP Predictions (100 Tests)")
     plt.ylabel("MSE")
-    
-    # Add exact values on top of bars, factoring in the standard deviation (std)
-    for bar, std in zip(bars, stds):
-        yval = bar.get_height()
-        # Place text above the error bar + a tiny margin
-        plt.text(bar.get_x() + bar.get_width()/2, yval + std + 0.0001, 
-                 f'{yval:.5f}', ha='center', va='bottom', fontweight='bold')
 
     plt.tight_layout()
     plt.savefig("assets/cnmp_mse_barplot.png")
@@ -204,7 +221,7 @@ def test(model, X_test, C_test, Y_test, max_obs_per_traj=10):
 
 if __name__ == "__main__":
     os.makedirs("assets", exist_ok=True)
-    device = torch.device("cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu")
+    device = torch.device("cpu")
     print(f"Using device: {device}")
 
     # Load data
@@ -233,16 +250,17 @@ if __name__ == "__main__":
     # Initialize CNMP
     model = CNMP(in_shape=(1, 4), condition_dim=1, hidden_size=128, num_hidden_layers=4).to(device)
     
-    epochs = 3000
+    epochs = 10000
     batch_size = 64
     max_observations_per_trajectory = 10
+    max_target_per_trajectory = 10
 
     # Optimizer and Scheduler
-    optimizer = torch.optim.AdamW(model.parameters(), lr=5e-4, weight_decay=1e-4)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-5)
     
     # Train the model (pass the scheduler, val sets)
-    train(model, optimizer, scheduler, X_train, C_train, Y_train, X_val, C_val, Y_val, epochs, batch_size, max_observations_per_trajectory)
+    train(model, optimizer, scheduler, X_train, C_train, Y_train, X_val, C_val, Y_val, epochs, batch_size, max_observations_per_trajectory, max_target_per_trajectory)
 
     # Evaluate the model (only on the unseen Test set)
-    test(model, X_test, C_test, Y_test, max_observations_per_trajectory)
+    test(model, X_test, C_test, Y_test, max_observations_per_trajectory, max_target_per_trajectory)

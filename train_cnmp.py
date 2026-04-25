@@ -110,7 +110,7 @@ def train(model, optimizer, scheduler, X_train, C_train, Y_train, X_val, C_val, 
             val_batch_idx = np.random.choice(len(X_val), min(batch_size, len(X_val)), replace=False)
             
             v_n_context = np.random.randint(1, max_obs_per_traj + 1)
-            v_n_target = np.random.randint(1, max_target_per_traj + 1)
+            v_n_target = 100 # Evaluate on all target points for a comprehensive validation metric
             
             v_obs_X = torch.empty((len(val_batch_idx), v_n_context, X_val.shape[-1]), device=device)
             v_obs_Y = torch.empty((len(val_batch_idx), v_n_context, Y_val.shape[-1]), device=device)
@@ -121,13 +121,12 @@ def train(model, optimizer, scheduler, X_train, C_train, Y_train, X_val, C_val, 
             # Generate UNIQUE time indices for each trajectory in the batch
             for i, idx in enumerate(val_batch_idx):
                 v_c_idx = np.random.choice(100, v_n_context, replace=False)
-                v_t_idx = np.random.choice(100, v_n_target, replace=False)
 
                 v_obs_X[i] = X_val[idx, v_c_idx, :]
                 v_obs_Y[i] = Y_val[idx, v_c_idx, :]
-                v_target[i] = X_val[idx, v_t_idx, :]
-                v_batch_C[i] = C_val[idx, v_t_idx, :]
-                v_target_truth[i] = Y_val[idx, v_t_idx, :]
+                v_target[i] = X_val[idx, :, :]
+                v_batch_C[i] = C_val[idx, :, :]
+                v_target_truth[i] = Y_val[idx, :, :]
 
             v_observation = torch.cat([v_obs_X, v_obs_Y], dim=-1)
             
@@ -162,7 +161,7 @@ def train(model, optimizer, scheduler, X_train, C_train, Y_train, X_val, C_val, 
     plt.savefig("assets/cnmp_training_loss.png")
     print("Saved training/val loss curve to assets/cnmp_training_loss.png")
 
-def test(model, X_test, C_test, Y_test, max_obs_per_traj=10, max_target_per_traj=10):
+def test(model, X_test, C_test, Y_test, max_obs_per_traj=10):
     print("\nRunning 100 Random Evaluation Tests on Best Model...")
     # Load the best weights
     model.load_state_dict(torch.load("assets/best_cnmp_model.pth"))
@@ -178,18 +177,15 @@ def test(model, X_test, C_test, Y_test, max_obs_per_traj=10, max_target_per_traj
         t_Y = Y_test[test_idx:test_idx+1]
         
         n_context = np.random.randint(1, max_obs_per_traj + 1)
-        n_target = np.random.randint(1, max_target_per_traj + 1)
-        
         context_idx = np.random.choice(100, n_context, replace=False)
-        target_idx = np.random.choice(100, n_target, replace=False)
         
         obs_X = t_X[:, context_idx, :]
         obs_Y = t_Y[:, context_idx, :]
         observation = torch.cat([obs_X, obs_Y], dim=-1)
         
-        target = t_X[:, target_idx, :]
-        condition = t_C[:, target_idx, :]
-        truth = t_Y[:, target_idx, :]
+        target = t_X[:, :, :]
+        condition = t_C[:, :, :]
+        truth = t_Y[:, :, :]
         
         with torch.no_grad():
             mean, _ = model(observation, target, condition)
@@ -211,7 +207,7 @@ def test(model, X_test, C_test, Y_test, max_obs_per_traj=10, max_target_per_traj
     stds = [ee_std, obj_std]
 
     plt.figure(figsize=(7, 6))
-    bars = plt.bar(labels, means, yerr=stds, capsize=10, color=['#4C72B0', '#DD8452'], alpha=0.8)
+    plt.bar(labels, means, yerr=stds, capsize=10, color=['#4C72B0', '#DD8452'], alpha=0.8)
     plt.title("Mean Squared Error of CNMP Predictions (100 Tests)")
     plt.ylabel("MSE")
 
@@ -263,4 +259,4 @@ if __name__ == "__main__":
     train(model, optimizer, scheduler, X_train, C_train, Y_train, X_val, C_val, Y_val, epochs, batch_size, max_observations_per_trajectory, max_target_per_trajectory)
 
     # Evaluate the model (only on the unseen Test set)
-    test(model, X_test, C_test, Y_test, max_observations_per_trajectory, max_target_per_trajectory)
+    test(model, X_test, C_test, Y_test, max_observations_per_trajectory)
